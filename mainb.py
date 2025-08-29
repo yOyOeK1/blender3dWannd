@@ -118,7 +118,8 @@ parameters = cv2.aruco.DetectorParameters()
 
 def DoProcess( frame ):
     global lastP
-
+    global acuLevel
+    global avgP
 
     # For a camera stream (inside a loop):
     frameNo = 0
@@ -191,7 +192,9 @@ def DoProcess( frame ):
     #    os.remove( vidPath )
     #except:
     #    print("remove not ok")
-    return 1
+        return {"avgP": avgP, "acuLevel": acuLevel,"r":rvecs[0][0] }
+    else:
+        return 1
 
         
 

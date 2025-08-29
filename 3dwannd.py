@@ -1,13 +1,6 @@
 import bpy
-import json
-import os
-import sys
-import time
-from mathutils import Vector
 from bpy_extras.object_utils import AddObjectHelper, object_data_add
-
-
-
+import sys
 
 sys.path.append( '/home/yoyo/Apps/blender3dWannd' )
 
@@ -16,6 +9,12 @@ for p in pSrc:
     sys.path.append( p )
 sys.path.append( '/home/yoyo/Apps/viteyss-site-3dWannd/bin/' )
 
+import json
+import numpy as np
+import os
+import time
+import math
+from mathutils import Vector
 import base64
 import wsHelper
 from threading import Thread
@@ -52,6 +51,41 @@ def add_object(context, mname, vecP = 1):
     
     
 
+def addMeshFromMsg( msg ):
+    global aaContext
+    context = aaContext
+    print("add / build mesh")
+    
+    if len(msg['faces'][0]) <= 2:
+        print("wrong mesh! to little points / faces")
+        return 0
+    
+    verts = []
+    for v in msg['verts']:
+        verts.append( Vector( ( v[0],v[1],v[2] ) ) )
+
+    mesh = bpy.data.meshes.new(name=msg['name'] )
+    mesh.from_pydata(verts, msg['edges'], msg['faces'] )
+    object_data_add(context, mesh)
+
+
+def rodriguesToEuler( rvec ):
+    rotation_matrix, _ = cv2.Rodrigues(rvec)
+    pitch = math.asin(-rotation_matrix[2][0])
+
+
+    # Handle gimbal lock case where pitch is near +/- pi/2
+    if abs(math.cos(pitch)) < 1e-6:  # Check for near-zero cosine
+        # Gimbal lock: yaw and roll become dependent
+        yaw = 0.0  # Or set to a fixed value like 0
+        roll = math.atan2(rotation_matrix[1][2], rotation_matrix[0][2])
+    else:
+        yaw = math.atan2(rotation_matrix[1][0], rotation_matrix[0][0])
+        roll = math.atan2(rotation_matrix[2][1], rotation_matrix[2][2])
+
+    return [yaw, pitch, roll]
+
+
 fpsRunnerRun = False
 circleObj = -1
 def fpsRunner( dwannd ):
@@ -80,7 +114,7 @@ def fpsRunner( dwannd ):
                 print('load file ....')
                 cap = cv2.VideoCapture( dwannd.tmpFile )
                 
-            if (gotF - currF) > 50:
+            if (gotF - currF) > 60:
                 over = (gotF - currF)
                 print(['process... over',over])
 
@@ -88,15 +122,32 @@ def fpsRunner( dwannd ):
                     #print(['process... currF',currF])
                     ret, frame = cap.read()
                     if (f%3) == 0:
-                        mainb.DoProcess( frame )
-                        dwannd.avgP = mainb.avgP                
-                        dwannd.accu = mainb.acuLevel
-                        
-                        if circleObj != -1 and len( dwannd.avgP ) == 3:
-                            circleObj.location = dwannd.avgP
-                            if dwannd.accu > 0.001:
-                                circleObj.scale = [ dwannd.accu,dwannd.accu,1.0]
-                        time.sleep(0.02)
+                        procRes = mainb.DoProcess( frame )
+                        if procRes != 1:
+                            #print(['1234',procRes])
+                            dwannd.avgP = procRes['avgP']                
+                            #print('567891')
+                            dwannd.accu = procRes['acuLevel']
+                            
+                            if dwannd.ws != -1 and mainb.avgP != []:
+                                jts = json.dumps({
+                                    "topic":"b3d/posUpdate",
+                                    "avgP": procRes['avgP'],
+                                    "accu": procRes['acuLevel'] 
+                                })
+                                dwannd.ws.send( f"wsSendToWSID:3dwannd:{jts}" )
+                                                        
+                            if circleObj != -1 and len( dwannd.avgP ) == 3:
+                                #print(procRes['r'])
+                                
+                                #circleObj.rotation_euler.order ='XYZ'
+                                #circleObj.rotation_euler[0] = procRes['r'][1]
+                                #circleObj.rotation_euler[1] = 0#procRes['r'][1]
+                                circleObj.rotation_euler = rodriguesToEuler( procRes['r'] )
+                                circleObj.location = dwannd.avgP
+                                if dwannd.accu > 0.1:
+                                    circleObj.scale = [ dwannd.accu,dwannd.accu,1.0]
+                            time.sleep(0.02)
                 
                     if gotF != -1:
                         currF+=1
@@ -209,6 +260,10 @@ class dwannd:
             tmpObj = aaContext.scene.objects.get(nTemp,-1)
             if tmpObj != -1:
                 tmpObj.location = self.avgP
+
+
+        elif j['topic'] == 'b3d/build/mesh':
+            addMeshFromMsg( j )
             
         
         
